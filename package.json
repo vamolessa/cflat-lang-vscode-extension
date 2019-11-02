@@ -1,0 +1,25 @@
+{
+    "name": "cflat",
+    "displayName": "cflat",
+    "description": "CFLat Language Integration",
+    "version": "0.0.1",
+    "engines": {
+        "vscode": "^1.39.0"
+    },
+    "categories": [
+        "Programming Languages"
+    ],
+    "contributes": {
+        "languages": [{
+            "id": "cflat",
+            "aliases": ["Cb", "CFlat"],
+            "extensions": [".cb"],
+            "configuration": "./language-configuration.json"
+        }],
+        "grammars": [{
+            "language": "cflat",
+            "scopeName": "source.cb",
+            "path": "./syntaxes/cflat.tmLanguage.json"
+        }]
+    }
+}
