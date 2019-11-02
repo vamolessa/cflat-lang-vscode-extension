@@ -6,15 +6,48 @@
 			"include": "#keywords"
 		},
 		{
+			"include": "#constants"
+		},
+		{
 			"include": "#strings"
 		}
 	],
 	"repository": {
 		"keywords": {
-			"patterns": [{
-				"name": "keyword.control.cflat",
-				"match": "\\b(if|while|for|return)\\b"
-			}]
+			"patterns": [
+				{
+					"name": "keyword.control.cflat",
+					"match": "\\b(if|else|while|repeat|return|break)\\b"
+				},
+				{
+					"name": "keyword.cflat",
+					"match": "\\b(fn|struct|let)\\b"
+				},
+				{
+					"name": "keyword.operator",
+					"match": "\\b(&)\\b"
+				},
+				{
+					"name": "storage.modifier.cflat",
+					"match": "\\b(mut)\\b"
+				}
+			]
+		},
+		"constants": {
+			"patterns": [
+				{
+					"name": "storage.type.cflat",
+					"match": "\\b(bool|int|float|string)\\b"
+				},
+				{
+					"name": "constant.language.cflat",
+					"match": "\\b(true|false)\\b"
+				},
+				{
+					"name": "constant.numeric.cflat",
+					"match": "\\b\\d+(\\.\\d+)?\\b"
+				}
+			]
 		},
 		"strings": {
 			"name": "string.quoted.double.cflat",
