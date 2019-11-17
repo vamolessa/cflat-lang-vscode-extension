@@ -13,7 +13,7 @@ import { basename } from 'path';
 import { CFlatRuntime, CFlatBreakpoint } from './CFlatRuntime';
 const { Subject } = require('await-notify');
 
-function timeout(ms) {
+function timeout(ms: number) {
 	return new Promise(resolve => setTimeout(resolve, ms));
 }
 
@@ -52,11 +52,11 @@ export class CFlatDebugSession extends LoggingDebugSession {
 	 * We configure the default implementation of a debug adapter here.
 	 */
 	public constructor() {
-		super("mock-debug.txt");
+		super("debug.txt");
 
 		// this debugger uses zero-based lines and columns
-		this.setDebuggerLinesStartAt1(false);
-		this.setDebuggerColumnsStartAt1(false);
+		this.setDebuggerLinesStartAt1(true);
+		this.setDebuggerColumnsStartAt1(true);
 
 		this._runtime = new CFlatRuntime();
 
@@ -107,14 +107,14 @@ export class CFlatDebugSession extends LoggingDebugSession {
 		response.body.supportsEvaluateForHovers = true;
 
 		// make VS Code to show a 'step back' button
-		response.body.supportsStepBack = true;
+		response.body.supportsStepBack = false;
 
 		// make VS Code to support data breakpoints
 		response.body.supportsDataBreakpoints = true;
 
 		// make VS Code to support completion in REPL
-		response.body.supportsCompletionsRequest = true;
-		response.body.completionTriggerCharacters = [".", "["];
+		response.body.supportsCompletionsRequest = false;
+		response.body.completionTriggerCharacters = [];
 
 		// make VS Code to send cancelRequests
 		response.body.supportsCancelRequest = true;

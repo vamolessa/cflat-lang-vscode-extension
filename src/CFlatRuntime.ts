@@ -12,7 +12,7 @@ export interface CFlatBreakpoint {
 }
 
 /**
- * A Mock runtime with minimal debugger functionality.
+ * A CFlat runtime with debugger functionality.
  */
 export class CFlatRuntime extends EventEmitter {
 
@@ -26,9 +26,9 @@ export class CFlatRuntime extends EventEmitter {
 	private _sourceLines: string[];
 
 	// This is the next line that will be 'executed'
-	private _currentLine = 0;
+	private _currentLine = 1;
 
-	// maps from sourceFile to array of Mock breakpoints
+	// maps from sourceFile to array of breakpoints
 	private _breakPoints = new Map<string, CFlatBreakpoint[]>();
 
 	// since we want to send breakpoint events, we will assign an id to every event
@@ -47,7 +47,7 @@ export class CFlatRuntime extends EventEmitter {
 	public start(program: string, stopOnEntry: boolean) {
 
 		this.loadSource(program);
-		this._currentLine = -1;
+		this._currentLine = 0;
 
 		this.verifyBreakpoints(this._sourceFile);
 

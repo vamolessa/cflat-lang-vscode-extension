@@ -17,21 +17,13 @@ import * as Net from 'net';
 const EMBED_DEBUG_ADAPTER = true;
 
 export function activate(context: vscode.ExtensionContext) {
-
-	context.subscriptions.push(vscode.commands.registerCommand('extension.cflat-debug.getProgramName', config => {
-		return vscode.window.showInputBox({
-			placeHolder: "Please enter the name of a markdown file in the workspace folder",
-			value: "readme.md"
-		});
-	}));
-
 	// register a configuration provider for 'cflat' debug type
-	const provider = new MockConfigurationProvider();
+	const provider = new CFlatConfigurationProvider();
 	context.subscriptions.push(vscode.debug.registerDebugConfigurationProvider('cflat', provider));
 
 	if (EMBED_DEBUG_ADAPTER) {
 		// The following use of a DebugAdapter factory shows how to run the debug adapter inside the extension host (and not as a separate process).
-		const factory = new MockDebugAdapterDescriptorFactory();
+		const factory = new CFlatDebugAdapterDescriptorFactory();
 		context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory('cflat', factory));
 		context.subscriptions.push(factory);
 	} else {
@@ -66,8 +58,7 @@ export function deactivate() {
 	// nothing to do
 }
 
-
-class MockConfigurationProvider implements vscode.DebugConfigurationProvider {
+class CFlatConfigurationProvider implements vscode.DebugConfigurationProvider {
 
 	/**
 	 * Massage a debug configuration just before a debug session is being launched,
@@ -78,18 +69,17 @@ class MockConfigurationProvider implements vscode.DebugConfigurationProvider {
 		// if launch.json is missing or empty
 		if (!config.type && !config.request && !config.name) {
 			const editor = vscode.window.activeTextEditor;
-			if (editor && editor.document.languageId === 'markdown') {
+			if (editor && editor.document.languageId === 'cflat') {
 				config.type = 'cflat';
-				config.name = 'Launch';
-				config.request = 'launch';
-				config.program = '${file}';
-				config.stopOnEntry = true;
+				config.name = 'CFlat Debugger';
+				config.request = 'attach';
+				config.program = 'cbd';
 			}
 		}
 
 		if (!config.program) {
 			return vscode.window.showInformationMessage("Cannot find a program to debug").then(_ => {
-				return undefined;	// abort launch
+				return undefined; // abort launch
 			});
 		}
 
@@ -97,7 +87,7 @@ class MockConfigurationProvider implements vscode.DebugConfigurationProvider {
 	}
 }
 
-class MockDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescriptorFactory {
+class CFlatDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescriptorFactory {
 
 	private server?: Net.Server;
 

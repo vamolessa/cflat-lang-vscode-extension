@@ -44,8 +44,7 @@
 	},
 	"main": "./out/extension",
 	"activationEvents": [
-		"onDebug",
-		"onCommand:extension.cflat-debug.getProgramName"
+		"onDebug"
 	],
 	"contributes": {
 		"languages": [
@@ -76,24 +75,19 @@
 		"debuggers": [
 			{
 				"type": "cflat",
-				"label": "CFlat Debug",
+				"label": "CFlat Debugger",
 				"program": "./out/CFlatAdapter.js",
 				"runtime": "node",
 				"configurationAttributes": {
-					"launch": {
+					"attach": {
 						"required": [
-							"program"
+							"command"
 						],
 						"properties": {
-							"program": {
+							"command": {
 								"type": "string",
-								"description": "Absolute path to a text file.",
-								"default": "${workspaceFolder}/${command:AskForProgramName}"
-							},
-							"stopOnEntry": {
-								"type": "boolean",
-								"description": "Automatically stop after launch.",
-								"default": true
+								"description": "Command to invoke the debugger (cbd)",
+								"default": "cbd"
 							},
 							"trace": {
 								"type": "boolean",
@@ -106,28 +100,11 @@
 				"initialConfigurations": [
 					{
 						"type": "cflat",
-						"request": "launch",
-						"name": "Ask for file name",
-						"program": "${workspaceFolder}/${command:AskForProgramName}",
-						"stopOnEntry": true
+						"name": "CFlat Debugger",
+						"request": "attach",
+						"command": "cbd"
 					}
-				],
-				"configurationSnippets": [
-					{
-						"label": "CFlat Debug: Launch",
-						"description": "A new configuration for 'debugging' a user selected markdown file.",
-						"body": {
-							"type": "cflat",
-							"request": "launch",
-							"name": "Ask for file name",
-							"program": "^\"\\${workspaceFolder}/\\${command:AskForProgramName}\"",
-							"stopOnEntry": true
-						}
-					}
-				],
-				"variables": {
-					"AskForProgramName": "extension.cflat-debug.getProgramName"
-				}
+				]
 			}
 		]
 	}
