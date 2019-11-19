@@ -24,11 +24,6 @@ function timeout(ms: number) {
  * The interface should always match this schema.
  */
 interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
-	/** An absolute path to the "program" to debug. */
-	program: string;
-	/** Automatically stop target after launch. If not specified, target does not stop. */
-	stopOnEntry?: boolean;
-	/** enable logging the Debug Adapter Protocol */
 	trace?: boolean;
 }
 
@@ -54,7 +49,7 @@ export class CFlatDebugSession extends LoggingDebugSession {
 	public constructor() {
 		super("debug.txt");
 
-		// this debugger uses zero-based lines and columns
+		// this debugger uses one-based lines and columns
 		this.setDebuggerLinesStartAt1(true);
 		this.setDebuggerColumnsStartAt1(true);
 
@@ -150,7 +145,7 @@ export class CFlatDebugSession extends LoggingDebugSession {
 		await this._configurationDone.wait(1000);
 
 		// start the program in the runtime
-		this._runtime.start(args.program, !!args.stopOnEntry);
+		this._runtime.start();
 
 		this.sendResponse(response);
 	}
@@ -179,17 +174,14 @@ export class CFlatDebugSession extends LoggingDebugSession {
 	}
 
 	protected breakpointLocationsRequest(response: DebugProtocol.BreakpointLocationsResponse, args: DebugProtocol.BreakpointLocationsArguments, request?: DebugProtocol.Request): void {
-
 		if (args.source.path) {
-			const bps = this._runtime.getBreakpoints(args.source.path, this.convertClientLineToDebugger(args.line));
-			response.body = {
-				breakpoints: bps.map(col => {
-					return {
-						line: args.line,
-						column: this.convertDebuggerColumnToClient(col)
-					}
-				})
-			};
+			this._runtime.getBreakpoints(args.source.path, bps => {
+				response.body = {
+					breakpoints: bps.map(line => {
+						return { line: line };
+					})
+				};
+			});
 		} else {
 			response.body = {
 				breakpoints: []
@@ -199,8 +191,6 @@ export class CFlatDebugSession extends LoggingDebugSession {
 	}
 
 	protected threadsRequest(response: DebugProtocol.ThreadsResponse): void {
-
-		// runtime supports no threads so just return a default thread.
 		response.body = {
 			threads: [
 				new Thread(CFlatDebugSession.THREAD_ID, "thread 1")
@@ -210,26 +200,23 @@ export class CFlatDebugSession extends LoggingDebugSession {
 	}
 
 	protected stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments): void {
-
 		const startFrame = typeof args.startFrame === 'number' ? args.startFrame : 0;
 		const maxLevels = typeof args.levels === 'number' ? args.levels : 1000;
 		const endFrame = startFrame + maxLevels;
 
-		const stk = this._runtime.stack(startFrame, endFrame);
-
-		response.body = {
-			stackFrames: stk.frames.map(f => new StackFrame(f.index, f.name, this.createSource(f.file), this.convertDebuggerLineToClient(f.line))),
-			totalFrames: stk.count
-		};
-		this.sendResponse(response);
+		this._runtime.stack(startFrame, endFrame, frames => {
+			response.body = {
+				stackFrames: frames.map(f => new StackFrame(f.index, f.name, this.createSource(f.file), this.convertDebuggerLineToClient(f.line))),
+				totalFrames: frames.length
+			};
+			this.sendResponse(response);
+		});
 	}
 
 	protected scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments): void {
-
 		response.body = {
 			scopes: [
-				new Scope("Local", this._variableHandles.create("local"), false),
-				new Scope("Global", this._variableHandles.create("global"), true)
+				new Scope("Local", this._variableHandles.create("local"), false)
 			]
 		};
 		this.sendResponse(response);
@@ -317,47 +304,14 @@ export class CFlatDebugSession extends LoggingDebugSession {
 		this.sendResponse(response);
 	}
 
-	protected reverseContinueRequest(response: DebugProtocol.ReverseContinueResponse, args: DebugProtocol.ReverseContinueArguments): void {
-		this._runtime.continue(true);
-		this.sendResponse(response);
-	}
-
 	protected nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments): void {
 		this._runtime.step();
-		this.sendResponse(response);
-	}
-
-	protected stepBackRequest(response: DebugProtocol.StepBackResponse, args: DebugProtocol.StepBackArguments): void {
-		this._runtime.step(true);
 		this.sendResponse(response);
 	}
 
 	protected evaluateRequest(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments): void {
 
 		let reply: string | undefined = undefined;
-
-		if (args.context === 'repl') {
-			// 'evaluate' supports to create and delete breakpoints from the 'repl':
-			const matches = /new +([0-9]+)/.exec(args.expression);
-			if (matches && matches.length === 2) {
-				const mbp = this._runtime.setBreakPoint(this._runtime.sourceFile, this.convertClientLineToDebugger(parseInt(matches[1])));
-				const bp = <DebugProtocol.Breakpoint>new Breakpoint(mbp.verified, this.convertDebuggerLineToClient(mbp.line), undefined, this.createSource(this._runtime.sourceFile));
-				bp.id = mbp.id;
-				this.sendEvent(new BreakpointEvent('new', bp));
-				reply = `breakpoint created`;
-			} else {
-				const matches = /del +([0-9]+)/.exec(args.expression);
-				if (matches && matches.length === 2) {
-					const mbp = this._runtime.clearBreakPoint(this._runtime.sourceFile, this.convertClientLineToDebugger(parseInt(matches[1])));
-					if (mbp) {
-						const bp = <DebugProtocol.Breakpoint>new Breakpoint(false);
-						bp.id = mbp.id;
-						this.sendEvent(new BreakpointEvent('removed', bp));
-						reply = `breakpoint deleted`;
-					}
-				}
-			}
-		}
 
 		response.body = {
 			result: reply ? reply : `evaluate(context: '${args.context}', '${args.expression}')`,

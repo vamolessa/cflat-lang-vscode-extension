@@ -72,15 +72,9 @@ class CFlatConfigurationProvider implements vscode.DebugConfigurationProvider {
 			if (editor && editor.document.languageId === 'cflat') {
 				config.type = 'cflat';
 				config.name = 'CFlat Debugger';
-				config.request = 'attach';
+				config.request = 'launch';
 				config.program = 'cbd';
 			}
-		}
-
-		if (!config.program) {
-			return vscode.window.showInformationMessage("Cannot find a program to debug").then(_ => {
-				return undefined; // abort launch
-			});
 		}
 
 		return config;

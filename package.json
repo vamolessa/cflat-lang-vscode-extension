@@ -79,7 +79,7 @@
 				"program": "./out/CFlatAdapter.js",
 				"runtime": "node",
 				"configurationAttributes": {
-					"attach": {
+					"launch": {
 						"required": [
 							"command"
 						],
@@ -101,7 +101,7 @@
 					{
 						"type": "cflat",
 						"name": "CFlat Debugger",
-						"request": "attach",
+						"request": "launch",
 						"command": "cbd"
 					}
 				]

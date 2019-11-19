@@ -4,6 +4,7 @@
 
 import { readFileSync } from 'fs';
 import { EventEmitter } from 'events';
+import * as HttpRequest from './HttpRequest';
 
 export interface CFlatBreakpoint {
 	id: number;
@@ -16,106 +17,61 @@ export interface CFlatBreakpoint {
  */
 export class CFlatRuntime extends EventEmitter {
 
-	// the initial (and one and only) file we are 'debugging'
-	private _sourceFile: string;
-	public get sourceFile() {
-		return this._sourceFile;
-	}
-
-	// the contents (= lines) of the one and only file
-	private _sourceLines: string[];
-
-	// This is the next line that will be 'executed'
-	private _currentLine = 1;
-
-	// maps from sourceFile to array of breakpoints
-	private _breakPoints = new Map<string, CFlatBreakpoint[]>();
-
-	// since we want to send breakpoint events, we will assign an id to every event
-	// so that the frontend can match events with breakpoints.
-	private _breakpointId = 1;
-
-	private _breakAddresses = new Set<string>();
+	private _serverBaseUrl = "http://localhost:4747";
 
 	constructor() {
 		super();
 	}
 
-	/**
-	 * Start executing the given program.
-	 */
-	public start(program: string, stopOnEntry: boolean) {
-
-		this.loadSource(program);
-		this._currentLine = 0;
-
-		this.verifyBreakpoints(this._sourceFile);
-
-		if (stopOnEntry) {
-			// we step once
-			this.step(false, 'stopOnEntry');
-		} else {
-			// we just start to run until we hit a breakpoint or an exception
-			this.continue();
-		}
-	}
-
-	/**
-	 * Continue execution to the end/beginning.
-	 */
-	public continue(reverse = false) {
-		this.run(reverse, undefined);
-	}
-
-	/**
-	 * Step to the next/previous non empty line.
-	 */
-	public step(reverse = false, event = 'stopOnStep') {
-		this.run(reverse, event);
-	}
-
-	/**
-	 * Returns a fake 'stacktrace' where every 'stackframe' is a word from the current line.
-	 */
-	public stack(startFrame: number, endFrame: number): any {
-
-		const words = this._sourceLines[this._currentLine].trim().split(/\s+/);
-
-		const frames = new Array<any>();
-		// every word of the current line becomes a stack frame.
-		for (let i = startFrame; i < Math.min(endFrame, words.length); i++) {
-			const name = words[i];	// use a word of the line as the stackframe name
-			frames.push({
-				index: i,
-				name: `${name}(${i})`,
-				file: this._sourceFile,
-				line: this._currentLine
-			});
-		}
-		return {
-			frames: frames,
-			count: words.length
-		};
-	}
-
-	public getBreakpoints(path: string, line: number): number[] {
-
-		const l = this._sourceLines[line];
-
-		let sawSpace = true;
-		const bps: number[] = [];
-		for (let i = 0; i < l.length; i++) {
-			if (l[i] !== ' ') {
-				if (sawSpace) {
-					bps.push(i);
-					sawSpace = false;
-				}
-			} else {
-				sawSpace = true;
+	private request(action: string, callback: (d: any) => void) {
+		HttpRequest.get(new URL(this._serverBaseUrl + action), (response) => {
+			if (typeof (response) == "string") {
+				callback(JSON.parse(response));
 			}
-		}
+		});
+	}
 
-		return bps;
+	public start() {
+		this.continue();
+	}
+
+	public continue() {
+		this.request("/execution/continue", _d => { });
+	}
+
+	public step(event = 'stopOnStep') {
+	}
+
+	public stack(startFrame: number, endFrame: number, callback: (r: Array<any>) => void) {
+		this.request("/stacktrace", st => {
+			const frames = new Array<any>();
+			for (let frame of st) {
+				frames.push({
+					index: frames.length,
+					name: frame["name"],
+					file: frame["source"],
+					line: frame["line"],
+					column: frame["column"],
+				});
+			}
+
+			callback(frames);
+		});
+	}
+
+	public getBreakpoints(path: string, callback: (r: number[]) => void) {
+		this.request("/breakpoints/all", bps => {
+			const breakpoints: number[] = [];
+			for (let bp of bps) {
+				const source = bp["source"];
+				const line = bp["line"];
+				if (source == path && typeof (line) === "number") {
+					breakpoints.push(line);
+				}
+			}
+
+			callback(breakpoints);
+		});
 	}
 
 	/*
@@ -190,27 +146,15 @@ export class CFlatRuntime extends EventEmitter {
 	 * Run through the file.
 	 * If stepEvent is specified only run a single step and emit the stepEvent.
 	 */
-	private run(reverse = false, stepEvent?: string) {
-		if (reverse) {
-			for (let ln = this._currentLine - 1; ln >= 0; ln--) {
-				if (this.fireEventsForLine(ln, stepEvent)) {
-					this._currentLine = ln;
-					return;
-				}
+	private run(stepEvent?: string) {
+		for (let ln = this._currentLine + 1; ln < this._sourceLines.length; ln++) {
+			if (this.fireEventsForLine(ln, stepEvent)) {
+				this._currentLine = ln;
+				return true;
 			}
-			// no more lines: stop at first line
-			this._currentLine = 0;
-			this.sendEvent('stopOnEntry');
-		} else {
-			for (let ln = this._currentLine + 1; ln < this._sourceLines.length; ln++) {
-				if (this.fireEventsForLine(ln, stepEvent)) {
-					this._currentLine = ln;
-					return true;
-				}
-			}
-			// no more lines: run to end
-			this.sendEvent('end');
 		}
+		// no more lines: run to end
+		this.sendEvent('end');
 	}
 
 	private verifyBreakpoints(path: string): void {
@@ -219,22 +163,13 @@ export class CFlatRuntime extends EventEmitter {
 			this.loadSource(path);
 			bps.forEach(bp => {
 				if (!bp.verified && bp.line < this._sourceLines.length) {
-					const srcLine = this._sourceLines[bp.line].trim();
+					// const srcLine = this._sourceLines[bp.line].trim();
+					// if (srcLine.length === 0) {
+					// 	bp.line++;
+					// }
 
-					// if a line is empty or starts with '+' we don't allow to set a breakpoint but move the breakpoint down
-					if (srcLine.length === 0 || srcLine.indexOf('+') === 0) {
-						bp.line++;
-					}
-					// if a line starts with '-' we don't allow to set a breakpoint but move the breakpoint up
-					if (srcLine.indexOf('-') === 0) {
-						bp.line--;
-					}
-					// don't set 'verified' to true if the line contains the word 'lazy'
-					// in this case the breakpoint will be verified 'lazy' after hitting it once.
-					if (srcLine.indexOf('lazy') < 0) {
-						bp.verified = true;
-						this.sendEvent('breakpointValidated', bp);
-					}
+					bp.verified = true;
+					this.sendEvent('breakpointValidated', bp);
 				}
 			});
 		}
