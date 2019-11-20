@@ -147,6 +147,11 @@ export class CFlatDebugSession extends LoggingDebugSession {
 		this.sendResponse(response);
 	}
 
+	protected disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments) {
+		this._runtime.stop();
+		this.sendResponse(response);
+	}
+
 	protected setBreakPointsRequest(response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments): void {
 		const path = <string>args.source.path;
 		const clientLines = args.lines || [];

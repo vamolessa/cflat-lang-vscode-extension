@@ -1,15 +1,11 @@
-/*---------------------------------------------------------
- * Copyright (C) Microsoft Corporation. All rights reserved.
- *--------------------------------------------------------*/
-
 import { EventEmitter } from 'events';
 import * as HttpRequest from './HttpRequest';
+import { setTimeout } from 'timers';
 
-/**
- * A CFlat runtime with debugger functionality.
- */
 export class CFlatRuntime extends EventEmitter {
 	private _serverBaseUrl = "http://localhost:4747";
+	private _pollInterval = 1000;
+	private _pollTimeout: NodeJS.Timeout;
 
 	constructor() {
 		super();
@@ -17,16 +13,13 @@ export class CFlatRuntime extends EventEmitter {
 
 	private request(action: string, callback: (d: any) => void) {
 		HttpRequest.get(new URL(this._serverBaseUrl + action), (response) => {
-			if (typeof (response) == "string") {
+			if (typeof response == "string") {
 				callback(JSON.parse(response));
 			} else {
+				clearTimeout(this._pollTimeout);
 				this.sendEvent("end");
 			}
 		});
-	}
-
-	private escapePath(path: string): string {
-		return path.replace(/\/|\\/g, ".");
 	}
 
 	private handleExecution(response: any) {
@@ -40,8 +33,23 @@ export class CFlatRuntime extends EventEmitter {
 		}
 	}
 
+	private pollExecution() {
+		this.request("/execution/poll", r => {
+			this.handleExecution(r)
+			this._pollTimeout = setTimeout(() => {
+				this.pollExecution();
+			}, this._pollInterval);
+		});
+	}
+
 	public start() {
 		this.request("/execution/continue", r => this.handleExecution(r));
+		this.stop();
+		this.pollExecution();
+	}
+
+	public stop() {
+		clearTimeout(this._pollTimeout);
 	}
 
 	public continue() {
@@ -65,8 +73,7 @@ export class CFlatRuntime extends EventEmitter {
 	}
 
 	public stack(startFrame: number, endFrame: number, callback: (r: Array<any>) => void) {
-		//this.request("/stacktrace", st => {
-		this.request(`/stacktrace?${startFrame}&${endFrame}`, st => {
+		this.request("/stacktrace", st => {
 			const frames = new Array<any>();
 			for (let frame of st) {
 				frames.push({
@@ -78,20 +85,16 @@ export class CFlatRuntime extends EventEmitter {
 				});
 			}
 
-			callback(frames);
+			callback(frames.slice(startFrame, endFrame));
 		});
 	}
 
-	/*
-	 * Set breakpoint in file with given line.
-	 */
 	public setBreakPoints(path: string, lines: number[], callback: (r: number[]) => void) {
-		path = this.escapePath(path);
 		const joinedLines = lines.join(",");
 		this.request(`/breakpoints/set?source=${path}&lines=${joinedLines}`, bpls => {
 			const breakpoints: number[] = [];
 			for (let line of bpls) {
-				if (typeof (line) === "number") {
+				if (typeof line === "number") {
 					breakpoints.push(line);
 				}
 			}
@@ -99,85 +102,6 @@ export class CFlatRuntime extends EventEmitter {
 			callback(breakpoints);
 		});
 	}
-
-	// private methods
-
-	/**
-	 * Run through the file.
-	 * If stepEvent is specified only run a single step and emit the stepEvent.
-	 */
-	/*
-	private run(stepEvent?: string) {
-		for (let ln = this._currentLine + 1; ln < this._sourceLines.length; ln++) {
-			if (this.fireEventsForLine(ln, stepEvent)) {
-				this._currentLine = ln;
-				return true;
-			}
-		}
-		// no more lines: run to end
-		this.sendEvent('end');
-	}
-	*/
-
-	/**
-	 * Fire events if line has a breakpoint or the word 'exception' is found.
-	 * Returns true is execution needs to stop.
-	 */
-	/*
-	private fireEventsForLine(ln: number, stepEvent?: string): boolean {
-
-		const line = this._sourceLines[ln].trim();
-
-		// if 'log(...)' found in source -> send argument to debug console
-		const matches = /log\((.*)\)/.exec(line);
-		if (matches && matches.length === 2) {
-			this.sendEvent('output', matches[1], this._sourceFile, ln, matches.index)
-		}
-
-		// if a word in a line matches a data breakpoint, fire a 'dataBreakpoint' event
-		const words = line.split(" ");
-		for (let word of words) {
-			if (this._breakAddresses.has(word)) {
-				this.sendEvent('stopOnDataBreakpoint');
-				return true;
-			}
-		}
-
-		// if word 'exception' found in source -> throw exception
-		if (line.indexOf('exception') >= 0) {
-			this.sendEvent('stopOnException');
-			return true;
-		}
-
-		// is there a breakpoint?
-		const breakpoints = this._breakPoints.get(this._sourceFile);
-		if (breakpoints) {
-			const bps = breakpoints.filter(bp => bp.line === ln);
-			if (bps.length > 0) {
-
-				// send 'stopped' event
-				this.sendEvent('stopOnBreakpoint');
-
-				// the following shows the use of 'breakpoint' events to update properties of a breakpoint in the UI
-				// if breakpoint is not yet verified, verify it now and send a 'breakpoint' update event
-				if (!bps[0].verified) {
-					bps[0].verified = true;
-					this.sendEvent('breakpointValidated', bps[0]);
-				}
-				return true;
-			}
-		}
-
-		// non-empty line
-		if (stepEvent && line.length > 0) {
-			this.sendEvent(stepEvent);
-			return true;
-		}
-
-		// nothing interesting found -> continue
-		return false;
-	}
-	*/
 
 	private sendEvent(event: string, ...args: any[]) {
 		setImmediate(_ => {
