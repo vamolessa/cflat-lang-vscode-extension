@@ -6,16 +6,12 @@ import {
 	Logger, logger,
 	LoggingDebugSession,
 	InitializedEvent, TerminatedEvent, StoppedEvent, OutputEvent,
-	Thread, StackFrame, Scope, Source, Handles, Breakpoint
+	Thread, StackFrame, Scope, Source, Breakpoint
 } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
 import { basename } from 'path';
 import { CFlatRuntime } from './CFlatRuntime';
 const { Subject } = require('await-notify');
-
-function timeout(ms: number) {
-	return new Promise(resolve => setTimeout(resolve, ms));
-}
 
 /**
  * This interface describes the debug specific launch attributes
@@ -28,19 +24,11 @@ interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
 }
 
 export class CFlatDebugSession extends LoggingDebugSession {
-
 	// we don't support multiple threads, so we can use a hardcoded ID for the default thread
 	private static THREAD_ID = 1;
 
-	// a CFlat runtime (or debugger)
 	private _runtime: CFlatRuntime;
-
-	private _variableHandles = new Handles<string>();
-
 	private _configurationDone = new Subject();
-
-	private _cancelationTokens = new Map<number, boolean>();
-	private _isLongrunning = new Map<number, boolean>();
 
 	/**
 	 * Creates a new debug adapter that is used for one debug session.
@@ -188,7 +176,7 @@ export class CFlatDebugSession extends LoggingDebugSession {
 		const maxLevels = typeof args.levels === 'number' ? args.levels : 1000;
 		const endFrame = startFrame + maxLevels;
 
-		this._runtime.stack(startFrame, endFrame, frames => {
+		this._runtime.stackTrace(startFrame, endFrame, frames => {
 			response.body = {
 				stackFrames: frames.map(f => new StackFrame(f.index, f.name, this.createSource(f.file), this.convertDebuggerLineToClient(f.line))),
 				totalFrames: frames.length
@@ -200,15 +188,31 @@ export class CFlatDebugSession extends LoggingDebugSession {
 	protected scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments): void {
 		response.body = {
 			scopes: [
-				new Scope("Local", this._variableHandles.create("local"), false)
+				new Scope("Local", 1000, false),
 			]
 		};
 		this.sendResponse(response);
 	}
 
 	protected async variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments, request?: DebugProtocol.Request) {
-		const variables: DebugProtocol.Variable[] = [];
+		this._runtime.variables(args.variablesReference, vars => {
+			const variables: DebugProtocol.Variable[] = [];
+			for (let v of vars) {
+				variables.push({
+					name: v.name,
+					type: v.type,
+					value: v.value,
+					variablesReference: 0
+				});
+			}
 
+			response.body = {
+				variables: variables
+			};
+			this.sendResponse(response);
+		});
+
+		/*
 		if (this._isLongrunning.get(args.variablesReference)) {
 			// long running
 
@@ -275,11 +279,7 @@ export class CFlatDebugSession extends LoggingDebugSession {
 				this._isLongrunning.set(ref, true);
 			}
 		}
-
-		response.body = {
-			variables: variables
-		};
-		this.sendResponse(response);
+		*/
 	}
 
 	protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments): void {
@@ -301,55 +301,6 @@ export class CFlatDebugSession extends LoggingDebugSession {
 			variablesReference: 0
 		};
 		this.sendResponse(response);
-	}
-
-	protected dataBreakpointInfoRequest(response: DebugProtocol.DataBreakpointInfoResponse, args: DebugProtocol.DataBreakpointInfoArguments): void {
-
-		response.body = {
-			dataId: null,
-			description: "cannot break on data access",
-			accessTypes: undefined,
-			canPersist: false
-		};
-
-		if (args.variablesReference && args.name) {
-			const id = this._variableHandles.get(args.variablesReference);
-			if (id.startsWith("global_")) {
-				response.body.dataId = args.name;
-				response.body.description = args.name;
-				response.body.accessTypes = ["read"];
-				response.body.canPersist = false;
-			}
-		}
-
-		this.sendResponse(response);
-	}
-
-	protected completionsRequest(response: DebugProtocol.CompletionsResponse, args: DebugProtocol.CompletionsArguments): void {
-
-		response.body = {
-			targets: [
-				{
-					label: "item 10",
-					sortText: "10"
-				},
-				{
-					label: "item 1",
-					sortText: "01"
-				},
-				{
-					label: "item 2",
-					sortText: "02"
-				}
-			]
-		};
-		this.sendResponse(response);
-	}
-
-	protected cancelRequest(response: DebugProtocol.CancelResponse, args: DebugProtocol.CancelArguments) {
-		if (args.requestId) {
-			this._cancelationTokens.set(args.requestId, true);
-		}
 	}
 
 	//---- helpers

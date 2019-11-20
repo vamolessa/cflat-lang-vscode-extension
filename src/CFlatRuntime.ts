@@ -2,6 +2,12 @@ import { EventEmitter } from 'events';
 import * as HttpRequest from './HttpRequest';
 import { setTimeout } from 'timers';
 
+export interface CFlatVariable {
+	name: string,
+	value: string,
+	type: string,
+}
+
 export class CFlatRuntime extends EventEmitter {
 	private _serverBaseUrl = "http://localhost:4747";
 	private _pollInterval = 1000;
@@ -26,16 +32,25 @@ export class CFlatRuntime extends EventEmitter {
 		let execution = response["execution"];
 		if (execution === "ExternalPaused") {
 			this.sendEvent("stopOnPause");
+			clearTimeout(this._pollTimeout);
 		} else if (execution === "BreakpointPaused") {
 			this.sendEvent("stopOnBreakpoint");
+			clearTimeout(this._pollTimeout);
 		} else if (execution === "StepPaused") {
 			this.sendEvent("stopOnStep");
+			clearTimeout(this._pollTimeout);
 		}
 	}
 
 	private pollExecution() {
-		this.request("/execution/poll", r => {
-			this.handleExecution(r)
+		this.request("/execution/poll", response => {
+			let execution = response["execution"];
+			if (execution === "BreakpointPaused") {
+				this.sendEvent("stopOnBreakpoint");
+			} else if (execution === "StepPaused") {
+				this.sendEvent("stopOnStep");
+			}
+
 			this._pollTimeout = setTimeout(() => {
 				this.pollExecution();
 			}, this._pollInterval);
@@ -43,9 +58,7 @@ export class CFlatRuntime extends EventEmitter {
 	}
 
 	public start() {
-		this.request("/execution/continue", r => this.handleExecution(r));
-		this.stop();
-		this.pollExecution();
+		this.continue();
 	}
 
 	public stop() {
@@ -54,6 +67,8 @@ export class CFlatRuntime extends EventEmitter {
 
 	public continue() {
 		this.request("/execution/continue", r => this.handleExecution(r));
+		clearTimeout(this._pollTimeout);
+		this.pollExecution();
 
 		let never = false
 		if (never) {
@@ -66,13 +81,15 @@ export class CFlatRuntime extends EventEmitter {
 
 	public step() {
 		this.request("/execution/step", r => this.handleExecution(r));
+		clearTimeout(this._pollTimeout);
+		this.pollExecution();
 	}
 
 	public pause() {
 		this.request("/execution/pause", r => this.handleExecution(r));
 	}
 
-	public stack(startFrame: number, endFrame: number, callback: (r: Array<any>) => void) {
+	public stackTrace(startFrame: number, endFrame: number, callback: (r: Array<any>) => void) {
 		this.request("/stacktrace", st => {
 			const frames = new Array<any>();
 			for (let frame of st) {
@@ -100,6 +117,26 @@ export class CFlatRuntime extends EventEmitter {
 			}
 
 			callback(breakpoints);
+		});
+	}
+
+	public variables(reference: number, callback: (r: CFlatVariable[]) => void) {
+		this.request("/values", vars => {
+			var variables: CFlatVariable[] = [];
+			for (let v of vars) {
+				const name = v["name"];
+				const type = v["type"];
+				const value = v["value"];
+				if (
+					typeof name === "string" &&
+					typeof type === "string" &&
+					typeof value === "string"
+				) {
+					variables.push({ name, type, value });
+				}
+			}
+
+			callback(variables);
 		});
 	}
 
