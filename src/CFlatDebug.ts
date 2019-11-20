@@ -188,7 +188,7 @@ export class CFlatDebugSession extends LoggingDebugSession {
 	protected scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments): void {
 		response.body = {
 			scopes: [
-				new Scope("Local", 1000, false),
+				new Scope("Local", 1, false),
 			]
 		};
 		this.sendResponse(response);
