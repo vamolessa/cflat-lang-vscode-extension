@@ -5,12 +5,12 @@
 import {
 	Logger, logger,
 	LoggingDebugSession,
-	InitializedEvent, TerminatedEvent, StoppedEvent, BreakpointEvent, OutputEvent,
+	InitializedEvent, TerminatedEvent, StoppedEvent, OutputEvent,
 	Thread, StackFrame, Scope, Source, Handles, Breakpoint
 } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
 import { basename } from 'path';
-import { CFlatRuntime, CFlatBreakpoint } from './CFlatRuntime';
+import { CFlatRuntime } from './CFlatRuntime';
 const { Subject } = require('await-notify');
 
 function timeout(ms: number) {
@@ -47,7 +47,7 @@ export class CFlatDebugSession extends LoggingDebugSession {
 	 * We configure the default implementation of a debug adapter here.
 	 */
 	public constructor() {
-		super("debug.txt");
+		super();
 
 		// this debugger uses one-based lines and columns
 		this.setDebuggerLinesStartAt1(true);
@@ -59,20 +59,17 @@ export class CFlatDebugSession extends LoggingDebugSession {
 		this._runtime.on('stopOnEntry', () => {
 			this.sendEvent(new StoppedEvent('entry', CFlatDebugSession.THREAD_ID));
 		});
+		this._runtime.on('stopOnPause', () => {
+			this.sendEvent(new StoppedEvent('pause', CFlatDebugSession.THREAD_ID));
+		});
 		this._runtime.on('stopOnStep', () => {
 			this.sendEvent(new StoppedEvent('step', CFlatDebugSession.THREAD_ID));
 		});
 		this._runtime.on('stopOnBreakpoint', () => {
 			this.sendEvent(new StoppedEvent('breakpoint', CFlatDebugSession.THREAD_ID));
 		});
-		this._runtime.on('stopOnDataBreakpoint', () => {
-			this.sendEvent(new StoppedEvent('data breakpoint', CFlatDebugSession.THREAD_ID));
-		});
 		this._runtime.on('stopOnException', () => {
 			this.sendEvent(new StoppedEvent('exception', CFlatDebugSession.THREAD_ID));
-		});
-		this._runtime.on('breakpointValidated', (bp: CFlatBreakpoint) => {
-			this.sendEvent(new BreakpointEvent('changed', <DebugProtocol.Breakpoint>{ verified: bp.verified, id: bp.id }));
 		});
 		this._runtime.on('output', (text, filePath, line, column) => {
 			const e: DebugProtocol.OutputEvent = new OutputEvent(`${text}\n`);
@@ -105,7 +102,7 @@ export class CFlatDebugSession extends LoggingDebugSession {
 		response.body.supportsStepBack = false;
 
 		// make VS Code to support data breakpoints
-		response.body.supportsDataBreakpoints = true;
+		response.body.supportsDataBreakpoints = false;
 
 		// make VS Code to support completion in REPL
 		response.body.supportsCompletionsRequest = false;
@@ -115,7 +112,7 @@ export class CFlatDebugSession extends LoggingDebugSession {
 		response.body.supportsCancelRequest = true;
 
 		// make VS Code send the breakpointLocations request
-		response.body.supportsBreakpointLocationsRequest = true;
+		response.body.supportsBreakpointLocationsRequest = false;
 
 		this.sendResponse(response);
 
@@ -151,43 +148,20 @@ export class CFlatDebugSession extends LoggingDebugSession {
 	}
 
 	protected setBreakPointsRequest(response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments): void {
-
 		const path = <string>args.source.path;
 		const clientLines = args.lines || [];
 
-		// clear all breakpoints for this file
-		this._runtime.clearBreakpoints(path);
+		this._runtime.setBreakPoints(path, clientLines, bps => {
+			const breakpoints: DebugProtocol.Breakpoint[] = [];
+			for (let bp of bps) {
+				breakpoints.push(new Breakpoint(true, this.convertDebuggerLineToClient(bp)));
+			}
 
-		// set and verify breakpoint locations
-		const actualBreakpoints = clientLines.map(l => {
-			let { verified, line, id } = this._runtime.setBreakPoint(path, this.convertClientLineToDebugger(l));
-			const bp = <DebugProtocol.Breakpoint>new Breakpoint(verified, this.convertDebuggerLineToClient(line));
-			bp.id = id;
-			return bp;
-		});
-
-		// send back the actual breakpoint positions
-		response.body = {
-			breakpoints: actualBreakpoints
-		};
-		this.sendResponse(response);
-	}
-
-	protected breakpointLocationsRequest(response: DebugProtocol.BreakpointLocationsResponse, args: DebugProtocol.BreakpointLocationsArguments, request?: DebugProtocol.Request): void {
-		if (args.source.path) {
-			this._runtime.getBreakpoints(args.source.path, bps => {
-				response.body = {
-					breakpoints: bps.map(line => {
-						return { line: line };
-					})
-				};
-			});
-		} else {
 			response.body = {
-				breakpoints: []
+				breakpoints: breakpoints
 			};
-		}
-		this.sendResponse(response);
+			this.sendResponse(response);
+		});
 	}
 
 	protected threadsRequest(response: DebugProtocol.ThreadsResponse): void {
@@ -196,6 +170,11 @@ export class CFlatDebugSession extends LoggingDebugSession {
 				new Thread(CFlatDebugSession.THREAD_ID, "thread 1")
 			]
 		};
+		this.sendResponse(response);
+	}
+
+	protected pauseRequest(response: DebugProtocol.PauseResponse, args: DebugProtocol.PauseArguments): void {
+		this._runtime.pause();
 		this.sendResponse(response);
 	}
 
@@ -223,7 +202,6 @@ export class CFlatDebugSession extends LoggingDebugSession {
 	}
 
 	protected async variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments, request?: DebugProtocol.Request) {
-
 		const variables: DebugProtocol.Variable[] = [];
 
 		if (this._isLongrunning.get(args.variablesReference)) {
@@ -337,26 +315,6 @@ export class CFlatDebugSession extends LoggingDebugSession {
 				response.body.accessTypes = ["read"];
 				response.body.canPersist = false;
 			}
-		}
-
-		this.sendResponse(response);
-	}
-
-	protected setDataBreakpointsRequest(response: DebugProtocol.SetDataBreakpointsResponse, args: DebugProtocol.SetDataBreakpointsArguments): void {
-
-		// clear all data breakpoints
-		this._runtime.clearAllDataBreakpoints();
-
-		response.body = {
-			breakpoints: []
-		};
-
-		for (let dbp of args.breakpoints) {
-			// assume that id is the "address" to break on
-			const ok = this._runtime.setDataBreakpoint(dbp.dataId);
-			response.body.breakpoints.push({
-				verified: ok
-			});
 		}
 
 		this.sendResponse(response);

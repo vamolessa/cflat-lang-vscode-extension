@@ -2,21 +2,13 @@
  * Copyright (C) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------*/
 
-import { readFileSync } from 'fs';
 import { EventEmitter } from 'events';
 import * as HttpRequest from './HttpRequest';
-
-export interface CFlatBreakpoint {
-	id: number;
-	line: number;
-	verified: boolean;
-}
 
 /**
  * A CFlat runtime with debugger functionality.
  */
 export class CFlatRuntime extends EventEmitter {
-
 	private _serverBaseUrl = "http://localhost:4747";
 
 	constructor() {
@@ -27,23 +19,54 @@ export class CFlatRuntime extends EventEmitter {
 		HttpRequest.get(new URL(this._serverBaseUrl + action), (response) => {
 			if (typeof (response) == "string") {
 				callback(JSON.parse(response));
+			} else {
+				this.sendEvent("end");
 			}
 		});
 	}
 
+	private escapePath(path: string): string {
+		return path.replace(/\/|\\/g, ".");
+	}
+
+	private handleExecution(response: any) {
+		let execution = response["execution"];
+		if (execution === "ExternalPaused") {
+			this.sendEvent("stopOnPause");
+		} else if (execution === "BreakpointPaused") {
+			this.sendEvent("stopOnBreakpoint");
+		} else if (execution === "StepPaused") {
+			this.sendEvent("stopOnStep");
+		}
+	}
+
 	public start() {
-		this.continue();
+		this.request("/execution/continue", r => this.handleExecution(r));
 	}
 
 	public continue() {
-		this.request("/execution/continue", _d => { });
+		this.request("/execution/continue", r => this.handleExecution(r));
+
+		let never = false
+		if (never) {
+			this.sendEvent('stopOnEntry');
+			this.sendEvent('stopOnBreakpoint');
+			this.sendEvent('stopOnStep');
+			this.sendEvent('end');
+		}
 	}
 
-	public step(event = 'stopOnStep') {
+	public step() {
+		this.request("/execution/step", r => this.handleExecution(r));
+	}
+
+	public pause() {
+		this.request("/execution/pause", r => this.handleExecution(r));
 	}
 
 	public stack(startFrame: number, endFrame: number, callback: (r: Array<any>) => void) {
-		this.request("/stacktrace", st => {
+		//this.request("/stacktrace", st => {
+		this.request(`/stacktrace?${startFrame}&${endFrame}`, st => {
 			const frames = new Array<any>();
 			for (let frame of st) {
 				frames.push({
@@ -59,13 +82,16 @@ export class CFlatRuntime extends EventEmitter {
 		});
 	}
 
-	public getBreakpoints(path: string, callback: (r: number[]) => void) {
-		this.request("/breakpoints/all", bps => {
+	/*
+	 * Set breakpoint in file with given line.
+	 */
+	public setBreakPoints(path: string, lines: number[], callback: (r: number[]) => void) {
+		path = this.escapePath(path);
+		const joinedLines = lines.join(",");
+		this.request(`/breakpoints/set?source=${path}&lines=${joinedLines}`, bpls => {
 			const breakpoints: number[] = [];
-			for (let bp of bps) {
-				const source = bp["source"];
-				const line = bp["line"];
-				if (source == path && typeof (line) === "number") {
+			for (let line of bpls) {
+				if (typeof (line) === "number") {
 					breakpoints.push(line);
 				}
 			}
@@ -74,78 +100,13 @@ export class CFlatRuntime extends EventEmitter {
 		});
 	}
 
-	/*
-	 * Set breakpoint in file with given line.
-	 */
-	public setBreakPoint(path: string, line: number): CFlatBreakpoint {
-
-		const bp = <CFlatBreakpoint>{ verified: false, line, id: this._breakpointId++ };
-		let bps = this._breakPoints.get(path);
-		if (!bps) {
-			bps = new Array<CFlatBreakpoint>();
-			this._breakPoints.set(path, bps);
-		}
-		bps.push(bp);
-
-		this.verifyBreakpoints(path);
-
-		return bp;
-	}
-
-	/*
-	 * Clear breakpoint in file with given line.
-	 */
-	public clearBreakPoint(path: string, line: number): CFlatBreakpoint | undefined {
-		let bps = this._breakPoints.get(path);
-		if (bps) {
-			const index = bps.findIndex(bp => bp.line === line);
-			if (index >= 0) {
-				const bp = bps[index];
-				bps.splice(index, 1);
-				return bp;
-			}
-		}
-		return undefined;
-	}
-
-	/*
-	 * Clear all breakpoints for file.
-	 */
-	public clearBreakpoints(path: string): void {
-		this._breakPoints.delete(path);
-	}
-
-	/*
-	 * Set data breakpoint.
-	 */
-	public setDataBreakpoint(address: string): boolean {
-		if (address) {
-			this._breakAddresses.add(address);
-			return true;
-		}
-		return false;
-	}
-
-	/*
-	 * Clear all data breakpoints.
-	 */
-	public clearAllDataBreakpoints(): void {
-		this._breakAddresses.clear();
-	}
-
 	// private methods
-
-	private loadSource(file: string) {
-		if (this._sourceFile !== file) {
-			this._sourceFile = file;
-			this._sourceLines = readFileSync(this._sourceFile).toString().split('\n');
-		}
-	}
 
 	/**
 	 * Run through the file.
 	 * If stepEvent is specified only run a single step and emit the stepEvent.
 	 */
+	/*
 	private run(stepEvent?: string) {
 		for (let ln = this._currentLine + 1; ln < this._sourceLines.length; ln++) {
 			if (this.fireEventsForLine(ln, stepEvent)) {
@@ -156,29 +117,13 @@ export class CFlatRuntime extends EventEmitter {
 		// no more lines: run to end
 		this.sendEvent('end');
 	}
-
-	private verifyBreakpoints(path: string): void {
-		let bps = this._breakPoints.get(path);
-		if (bps) {
-			this.loadSource(path);
-			bps.forEach(bp => {
-				if (!bp.verified && bp.line < this._sourceLines.length) {
-					// const srcLine = this._sourceLines[bp.line].trim();
-					// if (srcLine.length === 0) {
-					// 	bp.line++;
-					// }
-
-					bp.verified = true;
-					this.sendEvent('breakpointValidated', bp);
-				}
-			});
-		}
-	}
+	*/
 
 	/**
 	 * Fire events if line has a breakpoint or the word 'exception' is found.
 	 * Returns true is execution needs to stop.
 	 */
+	/*
 	private fireEventsForLine(ln: number, stepEvent?: string): boolean {
 
 		const line = this._sourceLines[ln].trim();
@@ -232,6 +177,7 @@ export class CFlatRuntime extends EventEmitter {
 		// nothing interesting found -> continue
 		return false;
 	}
+	*/
 
 	private sendEvent(event: string, ...args: any[]) {
 		setImmediate(_ => {
