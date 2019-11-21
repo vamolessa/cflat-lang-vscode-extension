@@ -15,19 +15,20 @@ export class CFlatRuntime extends EventEmitter {
 	private _pollInterval = 1000;
 	private _pollTimeout: NodeJS.Timeout;
 
+	private _started = false;
 	private _variablesCache: CFlatVariable[] = [];
+	private _firstBreakpointRequests = {};
 
 	constructor() {
 		super();
 	}
 
-	private request(action: string, callback: (d: any) => void) {
+	private request(action: string, callback: (d: any) => void, onError: () => void) {
 		HttpRequest.get(new URL(this._serverBaseUrl + action), (response) => {
 			if (typeof response == "string") {
 				callback(JSON.parse(response));
 			} else {
-				clearTimeout(this._pollTimeout);
-				this.sendEvent("end");
+				onError();
 			}
 		});
 	}
@@ -58,72 +59,122 @@ export class CFlatRuntime extends EventEmitter {
 			this._pollTimeout = setTimeout(() => {
 				this.pollExecution();
 			}, this._pollInterval);
-		});
+		}, () => { });
 	}
 
 	public start(url, pollInterval) {
 		this._serverBaseUrl = url;
 		this._pollInterval = pollInterval;
-		this.continue();
+		this._started = false;
+
+		this.firstContinue();
+		setTimeout(() => {
+			if (!this._started) {
+				this.stop();
+			}
+		}, 5000);
+	}
+
+	private firstContinue() {
+		this.request("/execution/poll", _response => {
+			if (!this._started) {
+				this._started = true;
+				for (let p in this._firstBreakpointRequests) {
+					const r = this._firstBreakpointRequests[p];
+					this.setBreakPoints(p, r.lines, r.callback);
+				}
+				this._firstBreakpointRequests = {};
+			}
+
+			this.continue();
+		}, () => {
+			if (!this._started) {
+				this.firstContinue();
+			} else {
+				this.stop();
+			}
+		});
 	}
 
 	public stop() {
 		clearTimeout(this._pollTimeout);
+		this.sendEvent("end");
+		this._started = true;
 	}
 
 	public continue() {
-		this.request("/execution/continue", r => this.handleExecution(r));
+		this.request("/execution/continue", r => this.handleExecution(r), () => { });
 		clearTimeout(this._pollTimeout);
 		this.pollExecution();
-
-		let never = false
-		if (never) {
-			this.sendEvent('stopOnEntry');
-			this.sendEvent('stopOnBreakpoint');
-			this.sendEvent('stopOnStep');
-			this.sendEvent('end');
-		}
 	}
 
 	public step() {
-		this.request("/execution/step", r => this.handleExecution(r));
+		this.request("/execution/step", r => this.handleExecution(r), () => { });
 		clearTimeout(this._pollTimeout);
 		this.pollExecution();
 	}
 
 	public pause() {
-		this.request("/execution/pause", r => this.handleExecution(r));
+		this.request("/execution/pause", r => this.handleExecution(r), () => { });
 	}
 
 	public stackTrace(startFrame: number, frameCount: number, callback: (r: Array<any>) => void) {
 		this.request("/stacktrace", st => {
 			const frames = new Array<any>();
 			for (let frame of st) {
-				frames.push({
-					index: frames.length,
-					name: frame["name"],
-					file: frame["source"],
-					line: frame["line"],
-					column: frame["column"],
-				});
-			}
+				const name = frame["name"];
+				const sourceUri = frame["sourceUri"];
+				const sourceNumber = frame["sourceNumber"];
+				const line = frame["line"];
+				const column = frame["column"];
 
-			callback(frames.slice(startFrame, startFrame + frameCount));
-		});
-	}
-
-	public setBreakPoints(path: string, lines: number[], callback: (r: number[]) => void) {
-		const joinedLines = lines.join(",");
-		this.request(`/breakpoints/set?source=${path}&lines=${joinedLines}`, bpls => {
-			const breakpoints: number[] = [];
-			for (let line of bpls) {
-				if (typeof line === "number") {
-					breakpoints.push(line);
+				if (
+					typeof name === "string" &&
+					typeof sourceUri === "string" &&
+					typeof sourceNumber === "number" &&
+					typeof line === "number" &&
+					typeof column === "number"
+				) {
+					frames.push({
+						index: frames.length,
+						name,
+						sourceUri,
+						sourceNumber,
+						line,
+						column,
+					});
 				}
 			}
 
-			callback(breakpoints);
-		});
+			callback(frames.slice(startFrame, startFrame + frameCount));
+		}, () => { });
+	}
+
+	public source(uri: string, callback: (c: string) => void) {
+		this.request(`/sources/content?uri=${uri}`, s => {
+			const content = s["content"];
+			if (typeof content === "string") {
+				callback(content);
+			}
+		}, () => { });
+	}
+
+	public setBreakPoints(path: string, lines: number[], callback: (r: number[]) => void) {
+		if (this._started) {
+			const joinedLines = lines.join(",");
+			this.request(`/breakpoints/set?path=${path}&lines=${joinedLines}`, bpls => {
+				const breakpoints: number[] = [];
+				for (let line of bpls) {
+					if (typeof line === "number") {
+						breakpoints.push(line);
+					}
+				}
+
+				callback(breakpoints);
+			}, () => { });
+		} else {
+			this._firstBreakpointRequests[path] = { lines: lines, callback: callback };
+		}
 	}
 
 	public variables(index: number, start: number, count: number, callback: (r: CFlatVariable[]) => void) {
@@ -135,7 +186,7 @@ export class CFlatRuntime extends EventEmitter {
 			this.request("/values/stack", vars => {
 				this._variablesCache = this.parseVariables(vars);
 				callback(this._variablesCache.slice(start, start + count));
-			});
+			}, () => { });
 		}
 	}
 

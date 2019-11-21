@@ -63,7 +63,7 @@ export class CFlatDebugSession extends LoggingDebugSession {
 		});
 		this._runtime.on('output', (text, filePath, line, column) => {
 			const e: DebugProtocol.OutputEvent = new OutputEvent(`${text}\n`);
-			e.body.source = this.createSource(filePath);
+			e.body.source = this.createSource(filePath, 0);
 			e.body.line = this.convertDebuggerLineToClient(line);
 			e.body.column = this.convertDebuggerColumnToClient(column);
 			this.sendEvent(e);
@@ -149,7 +149,7 @@ export class CFlatDebugSession extends LoggingDebugSession {
 		this._runtime.setBreakPoints(path, clientLines, bps => {
 			const breakpoints: DebugProtocol.Breakpoint[] = [];
 			for (let bp of bps) {
-				breakpoints.push(new Breakpoint(true, this.convertDebuggerLineToClient(bp)));
+				breakpoints.push(new Breakpoint(false, this.convertDebuggerLineToClient(bp)));
 			}
 
 			response.body = {
@@ -179,9 +179,24 @@ export class CFlatDebugSession extends LoggingDebugSession {
 
 		this._runtime.stackTrace(startFrame, maxLevels, frames => {
 			response.body = {
-				stackFrames: frames.map(f => new StackFrame(f.index, f.name, this.createSource(f.file), this.convertDebuggerLineToClient(f.line))),
+				stackFrames: frames.map(f => new StackFrame(
+					f.index,
+					f.name,
+					this.createSource(f.sourceUri, f.sourceReference),
+					this.convertDebuggerLineToClient(f.line),
+					this.convertDebuggerColumnToClient(f.column)
+				)),
 				totalFrames: frames.length
 			};
+			this.sendResponse(response);
+		});
+	}
+
+	protected sourceRequest(response: DebugProtocol.SourceResponse, args: DebugProtocol.SourceArguments): void {
+		const source = <DebugProtocol.Source>args.source;
+		const uri = <string>source.path;
+		this._runtime.source(uri, content => {
+			response.body.content = content;
 			this.sendResponse(response);
 		});
 	}
@@ -244,7 +259,13 @@ export class CFlatDebugSession extends LoggingDebugSession {
 
 	//---- helpers
 
-	private createSource(filePath: string): Source {
-		return new Source(basename(filePath), this.convertDebuggerPathToClient(filePath), undefined, undefined, 'cflat-adapter-data');
+	private createSource(filePath: string, reference: number): Source {
+		return new Source(
+			basename(filePath),
+			filePath,
+			reference,
+			undefined,
+			"cflat-adapter-data"
+		);
 	}
 }
