@@ -174,9 +174,8 @@ export class CFlatDebugSession extends LoggingDebugSession {
 	protected stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments): void {
 		const startFrame = typeof args.startFrame === 'number' ? args.startFrame : 0;
 		const maxLevels = typeof args.levels === 'number' ? args.levels : 1000;
-		const endFrame = startFrame + maxLevels;
 
-		this._runtime.stackTrace(startFrame, endFrame, frames => {
+		this._runtime.stackTrace(startFrame, maxLevels, frames => {
 			response.body = {
 				stackFrames: frames.map(f => new StackFrame(f.index, f.name, this.createSource(f.file), this.convertDebuggerLineToClient(f.line))),
 				totalFrames: frames.length
@@ -195,7 +194,10 @@ export class CFlatDebugSession extends LoggingDebugSession {
 	}
 
 	protected async variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments, request?: DebugProtocol.Request) {
-		this._runtime.variables(args.variablesReference, vars => {
+		const start = typeof args.start === 'number' ? args.start : 0;
+		const count = typeof args.count === 'number' ? args.count : 1000;
+
+		this._runtime.variables(args.variablesReference, start, count, vars => {
 			const variables: DebugProtocol.Variable[] = [];
 			for (let v of vars) {
 				variables.push({

@@ -6,6 +6,7 @@ export interface CFlatVariable {
 	name: string,
 	value: string,
 	type: string,
+	stackIndex: number,
 }
 
 export class CFlatRuntime extends EventEmitter {
@@ -89,7 +90,7 @@ export class CFlatRuntime extends EventEmitter {
 		this.request("/execution/pause", r => this.handleExecution(r));
 	}
 
-	public stackTrace(startFrame: number, endFrame: number, callback: (r: Array<any>) => void) {
+	public stackTrace(startFrame: number, frameCount: number, callback: (r: Array<any>) => void) {
 		this.request("/stacktrace", st => {
 			const frames = new Array<any>();
 			for (let frame of st) {
@@ -102,7 +103,7 @@ export class CFlatRuntime extends EventEmitter {
 				});
 			}
 
-			callback(frames.slice(startFrame, endFrame));
+			callback(frames.slice(startFrame, startFrame + frameCount));
 		});
 	}
 
@@ -120,23 +121,25 @@ export class CFlatRuntime extends EventEmitter {
 		});
 	}
 
-	public variables(reference: number, callback: (r: CFlatVariable[]) => void) {
+	public variables(reference: number, start: number, count: number, callback: (r: CFlatVariable[]) => void) {
 		this.request("/values", vars => {
 			var variables: CFlatVariable[] = [];
 			for (let v of vars) {
 				const name = v["name"];
 				const type = v["type"];
 				const value = v["value"];
+				const stackIndex = v["stackIndex"];
 				if (
 					typeof name === "string" &&
 					typeof type === "string" &&
-					typeof value === "string"
+					typeof value === "string" &&
+					typeof stackIndex === "number"
 				) {
-					variables.push({ name, type, value });
+					variables.push({ name, type, value, stackIndex });
 				}
 			}
 
-			callback(variables);
+			callback(variables.slice(start, start + count));
 		});
 	}
 
