@@ -20,12 +20,14 @@ const { Subject } = require('await-notify');
  * The interface should always match this schema.
  */
 interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
-	trace?: boolean;
+	url: string,
+	pollInterval: 1000
 }
 
 export class CFlatDebugSession extends LoggingDebugSession {
 	// we don't support multiple threads, so we can use a hardcoded ID for the default thread
 	private static THREAD_ID = 1;
+	private static SCOPE_REFERENCE = 9999;
 
 	private _runtime: CFlatRuntime;
 	private _configurationDone = new Subject();
@@ -124,13 +126,13 @@ export class CFlatDebugSession extends LoggingDebugSession {
 	protected async launchRequest(response: DebugProtocol.LaunchResponse, args: LaunchRequestArguments) {
 
 		// make sure to 'Stop' the buffered logging if 'trace' is not set
-		logger.setup(args.trace ? Logger.LogLevel.Verbose : Logger.LogLevel.Stop, false);
+		logger.setup(Logger.LogLevel.Stop, false);
 
 		// wait until configuration has finished (and configurationDoneRequest has been called)
 		await this._configurationDone.wait(1000);
 
 		// start the program in the runtime
-		this._runtime.start();
+		this._runtime.start(args.url, args.pollInterval);
 
 		this.sendResponse(response);
 	}
@@ -187,7 +189,7 @@ export class CFlatDebugSession extends LoggingDebugSession {
 	protected scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments): void {
 		response.body = {
 			scopes: [
-				new Scope("Local", 1, false),
+				new Scope("Local", CFlatDebugSession.SCOPE_REFERENCE, false),
 			]
 		};
 		this.sendResponse(response);
@@ -197,14 +199,18 @@ export class CFlatDebugSession extends LoggingDebugSession {
 		const start = typeof args.start === 'number' ? args.start : 0;
 		const count = typeof args.count === 'number' ? args.count : 1000;
 
-		this._runtime.variables(args.variablesReference, start, count, vars => {
+		let index = args.variablesReference < CFlatDebugSession.SCOPE_REFERENCE ?
+			args.variablesReference :
+			0;
+
+		this._runtime.variables(index, start, count, vars => {
 			const variables: DebugProtocol.Variable[] = [];
 			for (let v of vars) {
 				variables.push({
 					name: v.name,
 					type: v.type,
 					value: v.value,
-					variablesReference: 0
+					variablesReference: v.children.length > 0 ? v.index : 0,
 				});
 			}
 
@@ -213,75 +219,6 @@ export class CFlatDebugSession extends LoggingDebugSession {
 			};
 			this.sendResponse(response);
 		});
-
-		/*
-		if (this._isLongrunning.get(args.variablesReference)) {
-			// long running
-
-			if (request) {
-				this._cancelationTokens.set(request.seq, false);
-			}
-
-			for (let i = 0; i < 100; i++) {
-				await timeout(1000);
-				variables.push({
-					name: `i_${i}`,
-					type: "integer",
-					value: `${i}`,
-					variablesReference: 0
-				});
-				if (request && this._cancelationTokens.get(request.seq)) {
-					break;
-				}
-			}
-
-			if (request) {
-				this._cancelationTokens.delete(request.seq);
-			}
-
-		} else {
-
-			const id = this._variableHandles.get(args.variablesReference);
-
-			if (id) {
-				variables.push({
-					name: id + "_i",
-					type: "integer",
-					value: "123",
-					variablesReference: 0
-				});
-				variables.push({
-					name: id + "_f",
-					type: "float",
-					value: "3.14",
-					variablesReference: 0
-				});
-				variables.push({
-					name: id + "_s",
-					type: "string",
-					value: "hello world",
-					variablesReference: 0
-				});
-				variables.push({
-					name: id + "_o",
-					type: "object",
-					value: "Object",
-					variablesReference: this._variableHandles.create(id + "_o")
-				});
-
-				// cancelation support for long running requests
-				const nm = id + "_long_running";
-				const ref = this._variableHandles.create(id + "_lr");
-				variables.push({
-					name: nm,
-					type: "object",
-					value: "Object",
-					variablesReference: ref
-				});
-				this._isLongrunning.set(ref, true);
-			}
-		}
-		*/
 	}
 
 	protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments): void {

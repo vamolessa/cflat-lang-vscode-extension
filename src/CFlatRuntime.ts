@@ -6,13 +6,16 @@ export interface CFlatVariable {
 	name: string,
 	value: string,
 	type: string,
-	stackIndex: number,
+	index: number,
+	children: CFlatVariable[],
 }
 
 export class CFlatRuntime extends EventEmitter {
 	private _serverBaseUrl = "http://localhost:4747";
 	private _pollInterval = 1000;
 	private _pollTimeout: NodeJS.Timeout;
+
+	private _variablesCache: CFlatVariable[] = [];
 
 	constructor() {
 		super();
@@ -58,7 +61,9 @@ export class CFlatRuntime extends EventEmitter {
 		});
 	}
 
-	public start() {
+	public start(url, pollInterval) {
+		this._serverBaseUrl = url;
+		this._pollInterval = pollInterval;
 		this.continue();
 	}
 
@@ -121,26 +126,61 @@ export class CFlatRuntime extends EventEmitter {
 		});
 	}
 
-	public variables(reference: number, start: number, count: number, callback: (r: CFlatVariable[]) => void) {
-		this.request("/values", vars => {
-			var variables: CFlatVariable[] = [];
-			for (let v of vars) {
-				const name = v["name"];
-				const type = v["type"];
-				const value = v["value"];
-				const stackIndex = v["stackIndex"];
-				if (
-					typeof name === "string" &&
-					typeof type === "string" &&
-					typeof value === "string" &&
-					typeof stackIndex === "number"
-				) {
-					variables.push({ name, type, value, stackIndex });
-				}
+	public variables(index: number, start: number, count: number, callback: (r: CFlatVariable[]) => void) {
+		if (index > 0) {
+			const v = this.findVariableAtIndex(this._variablesCache, index);
+			const vars = v !== null ? v.children : [];
+			callback(vars);
+		} else {
+			this.request("/values/stack", vars => {
+				this._variablesCache = this.parseVariables(vars);
+				callback(this._variablesCache.slice(start, start + count));
+			});
+		}
+	}
+
+	private parseVariables(vars: any[]): CFlatVariable[] {
+		const variables: CFlatVariable[] = [];
+
+		for (let v of vars) {
+			const name = v["name"];
+			const type = v["type"];
+			const value = v["value"];
+			const index = v["index"];
+			const children = v["children"];
+			if (
+				typeof name === "string" &&
+				typeof type === "string" &&
+				typeof value === "string" &&
+				typeof index === "number" &&
+				typeof children === "object"
+			) {
+				variables.push({
+					name,
+					type,
+					value,
+					index,
+					children: this.parseVariables(children)
+				});
+			}
+		}
+
+		return variables;
+	}
+
+	private findVariableAtIndex(vars: CFlatVariable[], index: number): CFlatVariable | null {
+		for (let v of vars) {
+			if (v.index === index) {
+				return v;
 			}
 
-			callback(variables.slice(start, start + count));
-		});
+			const child = this.findVariableAtIndex(v.children, index);
+			if (child !== null) {
+				return child;
+			}
+		}
+
+		return null;
 	}
 
 	private sendEvent(event: string, ...args: any[]) {

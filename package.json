@@ -81,18 +81,18 @@
 				"configurationAttributes": {
 					"launch": {
 						"required": [
-							"command"
+							"url"
 						],
 						"properties": {
-							"command": {
+							"url": {
 								"type": "string",
 								"description": "Command to invoke the debugger (cbd)",
-								"default": "cbd"
+								"default": "http://localhost:4747"
 							},
-							"trace": {
-								"type": "boolean",
-								"description": "Enable logging of the Debug Adapter Protocol.",
-								"default": true
+							"pollInterval": {
+								"type": "number",
+								"description": "Interval between server polls in milliseconds",
+								"default": 1000
 							}
 						}
 					}
@@ -102,7 +102,21 @@
 						"type": "cflat",
 						"name": "CFlat Debugger",
 						"request": "launch",
-						"command": "cbd"
+						"url": "http://localhost:4747",
+						"pollInterval": 1000
+					}
+				],
+				"configurationSnippets": [
+					{
+						"label": "CFlat Debug: Launch",
+						"description": "A new configuration for cflat debugging",
+						"body": {
+							"type": "cflat",
+							"name": "CFlat Debugger",
+							"request": "launch",
+							"url": "http://localhost:4747",
+							"pollInterval": 1000
+						}
 					}
 				]
 			}
