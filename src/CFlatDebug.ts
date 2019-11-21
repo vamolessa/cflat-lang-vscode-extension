@@ -174,15 +174,15 @@ export class CFlatDebugSession extends LoggingDebugSession {
 	}
 
 	protected stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments): void {
-		const startFrame = typeof args.startFrame === 'number' ? args.startFrame : 0;
-		const maxLevels = typeof args.levels === 'number' ? args.levels : 1000;
+		const startFrame = typeof args.startFrame === "number" ? args.startFrame : 0;
+		const maxLevels = typeof args.levels === "number" ? args.levels : 1000;
 
 		this._runtime.stackTrace(startFrame, maxLevels, frames => {
 			response.body = {
 				stackFrames: frames.map(f => new StackFrame(
 					f.index,
 					f.name,
-					this.createSource(f.sourceUri, f.sourceReference),
+					this.createSource(f.sourceUri, f.sourceNumber),
 					this.convertDebuggerLineToClient(f.line),
 					this.convertDebuggerColumnToClient(f.column)
 				)),
@@ -196,6 +196,7 @@ export class CFlatDebugSession extends LoggingDebugSession {
 		const source = <DebugProtocol.Source>args.source;
 		const uri = <string>source.path;
 		this._runtime.source(uri, content => {
+			response.body = response.body || {};
 			response.body.content = content;
 			this.sendResponse(response);
 		});
@@ -211,8 +212,8 @@ export class CFlatDebugSession extends LoggingDebugSession {
 	}
 
 	protected async variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments, request?: DebugProtocol.Request) {
-		const start = typeof args.start === 'number' ? args.start : 0;
-		const count = typeof args.count === 'number' ? args.count : 1000;
+		const start = typeof args.start === "number" ? args.start : 0;
+		const count = typeof args.count === "number" ? args.count : 1000;
 
 		let index = args.variablesReference < CFlatDebugSession.SCOPE_REFERENCE ?
 			args.variablesReference :
@@ -260,6 +261,10 @@ export class CFlatDebugSession extends LoggingDebugSession {
 	//---- helpers
 
 	private createSource(filePath: string, reference: number): Source {
+		if (!filePath.endsWith(".cb")) {
+			filePath += ".cs";
+		}
+
 		return new Source(
 			basename(filePath),
 			filePath,
