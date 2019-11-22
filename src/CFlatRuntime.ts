@@ -124,6 +124,12 @@ export class CFlatRuntime extends EventEmitter {
 		return uri.replace(/\\/g, "/").replace(/(.*)\.\w+$/, "$1");
 	}
 
+	public sources(callback: (us: string[]) => void) {
+		this.request("/sources/list", uris => {
+			callback(uris);
+		});
+	}
+
 	public source(uri: string, callback: (c: string) => void) {
 		uri = this.parseUri(uri);
 		this.request(`/sources/content?uri=${uri}`, content => {

@@ -198,6 +198,18 @@ export class CFlatDebugSession extends LoggingDebugSession {
 		});
 	}
 
+	protected loadedSourcesRequest(response: DebugProtocol.LoadedSourcesResponse, args: DebugProtocol.LoadedSourcesArguments): void {
+		this._runtime.sources(uris => {
+			response.body = response.body || {};
+			var sources: Source[] = [];
+			for (let uri of uris) {
+				sources.push(this.createSource(uri));
+			}
+			response.body.sources = sources;
+			this.sendResponse(response);
+		});
+	}
+
 	protected sourceRequest(response: DebugProtocol.SourceResponse, args: DebugProtocol.SourceArguments): void {
 		const source = <DebugProtocol.Source>args.source;
 		const uri = <string>source.path;
