@@ -97,14 +97,12 @@ export class CFlatRuntime extends EventEmitter {
 			for (let frame of st) {
 				const name = frame["name"];
 				const sourceUri = frame["sourceUri"];
-				const sourceNumber = frame["sourceNumber"];
 				const line = frame["line"];
 				const column = frame["column"];
 
 				if (
 					typeof name === "string" &&
 					typeof sourceUri === "string" &&
-					typeof sourceNumber === "number" &&
 					typeof line === "number" &&
 					typeof column === "number"
 				) {
@@ -112,7 +110,6 @@ export class CFlatRuntime extends EventEmitter {
 						index: frames.length,
 						name,
 						sourceUri,
-						sourceNumber,
 						line,
 						column,
 					});
@@ -123,26 +120,41 @@ export class CFlatRuntime extends EventEmitter {
 		});
 	}
 
+	private parseUri(uri: string): string {
+		return uri.replace(/\\/g, "/").replace(/(.*)\.\w+$/, "$1");
+	}
+
 	public source(uri: string, callback: (c: string) => void) {
-		uri = uri.replace(/\\/g, "/").replace(/(.*)\.\w+$/, "$1");
+		uri = this.parseUri(uri);
 		this.request(`/sources/content?uri=${uri}`, content => {
 			if (typeof content === "string") {
 				callback(content);
+			} else {
+				callback("\n");
 			}
 		});
 	}
 
-	public setBreakPoints(path: string, lines: number[], callback: (r: number[]) => void) {
+	public setBreakPoints(path: string, lines: number[], callback: (uri: string, lines: number[]) => void) {
+		path = this.parseUri(path);
 		const joinedLines = lines.join(",");
-		this.request(`/breakpoints/set?path=${path}&lines=${joinedLines}`, bpls => {
-			const breakpoints: number[] = [];
-			for (let line of bpls) {
-				if (typeof line === "number") {
-					breakpoints.push(line);
-				}
-			}
 
-			callback(breakpoints);
+		this.request(`/breakpoints/set?path=${path}&lines=${joinedLines}`, r => {
+			const sourceUri = r["sourceUri"];
+			const lines = r["breakpoints"];
+
+			const breakpoints: number[] = [];
+			if (typeof sourceUri === "string") {
+				for (let line of lines) {
+					if (typeof line === "number") {
+						breakpoints.push(line);
+					}
+				}
+
+				callback(sourceUri, breakpoints);
+			} else {
+				callback(path, []);
+			}
 		});
 	}
 

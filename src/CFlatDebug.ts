@@ -63,7 +63,7 @@ export class CFlatDebugSession extends LoggingDebugSession {
 		});
 		this._runtime.on('output', (text, filePath, line, column) => {
 			const e: DebugProtocol.OutputEvent = new OutputEvent(`${text}\n`);
-			e.body.source = this.createSource(filePath, 0);
+			e.body.source = this.createSource(filePath);
 			e.body.line = this.convertDebuggerLineToClient(line);
 			e.body.column = this.convertDebuggerColumnToClient(column);
 			this.sendEvent(e);
@@ -146,10 +146,16 @@ export class CFlatDebugSession extends LoggingDebugSession {
 		const path = <string>args.source.path;
 		const clientLines = args.lines || [];
 
-		this._runtime.setBreakPoints(path, clientLines, bps => {
+		this._runtime.setBreakPoints(path, clientLines, (uri, bps) => {
 			const breakpoints: DebugProtocol.Breakpoint[] = [];
 			for (let bp of bps) {
-				breakpoints.push(new Breakpoint(false, this.convertDebuggerLineToClient(bp)));
+				const breakpoint = new Breakpoint(
+					false,
+					this.convertDebuggerLineToClient(bp),
+					undefined,
+					this.createSource(uri)
+				);
+				breakpoints.push(breakpoint);
 			}
 
 			response.body = {
@@ -182,7 +188,7 @@ export class CFlatDebugSession extends LoggingDebugSession {
 				stackFrames: frames.map(f => new StackFrame(
 					f.index,
 					f.name,
-					this.createSource(f.sourceUri, f.sourceNumber),
+					this.createSource(f.sourceUri),
 					this.convertDebuggerLineToClient(f.line),
 					this.convertDebuggerColumnToClient(f.column)
 				)),
@@ -260,15 +266,15 @@ export class CFlatDebugSession extends LoggingDebugSession {
 
 	//---- helpers
 
-	private createSource(filePath: string, reference: number): Source {
-		if (!filePath.endsWith(".cb")) {
-			filePath += ".cs";
+	private createSource(uri: string): Source {
+		if (!uri.endsWith(".cb")) {
+			uri += ".cb";
 		}
 
 		return new Source(
-			basename(filePath),
-			filePath,
-			reference,
+			basename(uri),
+			uri,
+			1,
 			undefined,
 			"cflat-adapter-data"
 		);
