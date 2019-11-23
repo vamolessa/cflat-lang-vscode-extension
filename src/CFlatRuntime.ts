@@ -4,17 +4,17 @@ import { setTimeout } from 'timers';
 
 export interface CFlatVariable {
 	name: string,
-	value: string,
 	type: string,
-	index: number,
-	children: CFlatVariable[],
+	value: string,
+	values: CFlatVariable[] | undefined,
+	reference: number,
 }
 
 export class CFlatRuntime extends EventEmitter {
 	private _serverBaseUrl = "http://localhost:4747";
 	private _pollInterval = 1000;
 	private _pollTimeout: NodeJS.Timeout;
-	private _variablesCache: CFlatVariable[] = [];
+	private _variableReferences: string[] = [];
 
 	constructor() {
 		super();
@@ -66,7 +66,8 @@ export class CFlatRuntime extends EventEmitter {
 	public start(url, pollInterval) {
 		this._serverBaseUrl = url;
 		this._pollInterval = pollInterval;
-		this.continue();
+		clearTimeout(this._pollTimeout);
+		this.pollExecution();
 	}
 
 	public stop() {
@@ -164,61 +165,79 @@ export class CFlatRuntime extends EventEmitter {
 		});
 	}
 
-	public variables(index: number, start: number, count: number, callback: (r: CFlatVariable[]) => void) {
-		if (index > 0) {
-			const v = this.findVariableAtIndex(this._variablesCache, index);
-			const vars = v !== null ? v.children : [];
-			callback(vars);
+	public variables(reference: number, callback: (r: CFlatVariable[]) => void) {
+		if (reference > 0) {
+			if (reference <= this._variableReferences.length) {
+				const path = this._variableReferences[reference - 1];
+				this.evaluate(path, v => {
+					callback(v && v.values ? v.values : []);
+				});
+			} else {
+				callback([]);
+			}
 		} else {
-			this.request("/values/stack", vars => {
-				this._variablesCache = this.parseVariables(vars);
-				callback(this._variablesCache.slice(start, start + count));
+			this.request("/values", vars => {
+				const values = this.parseVariables("", vars["values"]) || [];
+				callback(values);
 			});
 		}
 	}
 
-	private parseVariables(vars: any[]): CFlatVariable[] {
+	private parseVariables(path: string, vars: any[]): CFlatVariable[] | undefined {
+		if (!vars) {
+			return undefined;
+		}
+
 		const variables: CFlatVariable[] = [];
 
 		for (let v of vars) {
-			const name = v["name"];
-			const type = v["type"];
-			const value = v["value"];
-			const index = v["index"];
-			const children = v["children"];
-			if (
-				typeof name === "string" &&
-				typeof type === "string" &&
-				typeof value === "string" &&
-				typeof index === "number" &&
-				typeof children === "object"
-			) {
-				variables.push({
-					name,
-					type,
-					value,
-					index,
-					children: this.parseVariables(children)
-				});
+			const varName = v["name"];
+			path = path.length > 0 ? path + "." + varName : varName;
+			const variable = this.parseVariable(path, v);
+			if (variable) {
+				variables.push(variable);
 			}
 		}
 
 		return variables;
 	}
 
-	private findVariableAtIndex(vars: CFlatVariable[], index: number): CFlatVariable | null {
-		for (let v of vars) {
-			if (v.index === index) {
-				return v;
+	private parseVariable(path: string, v: any): CFlatVariable | undefined {
+		const name = v["name"];
+		const type = v["type"];
+		const value = v["value"];
+		if (
+			typeof name === "string" &&
+			typeof type === "string" &&
+			typeof value === "string"
+		) {
+			let reference = 0;
+
+			const values = this.parseVariables(path, v["values"]);
+			if (values) {
+				for (let i = 0; i < this._variableReferences.length; i++) {
+					const r = this._variableReferences[i];
+					if (r === path) {
+						reference = i + 1;
+						break;
+					}
+				}
+				if (reference === 0) {
+					this._variableReferences.push(path);
+					reference = this._variableReferences.length;
+				}
 			}
 
-			const child = this.findVariableAtIndex(v.children, index);
-			if (child !== null) {
-				return child;
-			}
+			return { name, type, value, values, reference };
 		}
 
-		return null;
+		return undefined;
+	}
+
+	public evaluate(path: string, callback: (r: CFlatVariable | undefined) => void) {
+		this.request(`/values?path=${path}`, v => {
+			callback(this.parseVariable(path, v));
+		});
 	}
 
 	private sendEvent(event: string, ...args: any[]) {

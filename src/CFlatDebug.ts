@@ -27,7 +27,7 @@ interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
 export class CFlatDebugSession extends LoggingDebugSession {
 	// we don't support multiple threads, so we can use a hardcoded ID for the default thread
 	private static THREAD_ID = 1;
-	private static SCOPE_REFERENCE = 9999;
+	private static SCOPE_REFERENCE = 99999;
 
 	private _runtime: CFlatRuntime;
 	private _configurationDone = new Subject();
@@ -233,23 +233,33 @@ export class CFlatDebugSession extends LoggingDebugSession {
 		const start = typeof args.start === "number" ? args.start : 0;
 		const count = typeof args.count === "number" ? args.count : 1000;
 
-		let index = args.variablesReference < CFlatDebugSession.SCOPE_REFERENCE ?
+		let reference = args.variablesReference < CFlatDebugSession.SCOPE_REFERENCE ?
 			args.variablesReference :
 			0;
 
-		this._runtime.variables(index, start, count, vars => {
+		this._runtime.variables(reference, vars => {
 			const variables: DebugProtocol.Variable[] = [];
 			for (let v of vars) {
 				variables.push({
 					name: v.name,
 					type: v.type,
 					value: v.value,
-					variablesReference: v.children.length > 0 ? v.index : 0,
+					variablesReference: v.reference,
 				});
 			}
 
 			response.body = {
-				variables: variables
+				variables: variables.slice(start, start + count)
+			};
+			this.sendResponse(response);
+		});
+	}
+
+	protected evaluateRequest(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments): void {
+		this._runtime.evaluate(args.expression, v => {
+			response.body = {
+				result: v ? v.value : "",
+				variablesReference: v ? v.reference : 0
 			};
 			this.sendResponse(response);
 		});
@@ -262,17 +272,6 @@ export class CFlatDebugSession extends LoggingDebugSession {
 
 	protected nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments): void {
 		this._runtime.step();
-		this.sendResponse(response);
-	}
-
-	protected evaluateRequest(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments): void {
-
-		let reply: string | undefined = undefined;
-
-		response.body = {
-			result: reply ? reply : `evaluate(context: '${args.context}', '${args.expression}')`,
-			variablesReference: 0
-		};
 		this.sendResponse(response);
 	}
 
